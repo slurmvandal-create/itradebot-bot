@@ -298,3 +298,7 @@ def get_stats():
     conn.close()
     return users_count, orders_count, reviews_count
 
+
+def list_user_orders(user_id):
+    """Псевдоним для get_user_orders."""
+    return get_user_orders(user_id)
