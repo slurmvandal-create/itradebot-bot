@@ -133,7 +133,7 @@ def add_order(user_id, username=None, full_name=None, device=None,
     return order_id
 
 
-def get_user_orders(user_id):
+def list_user_orders(user_id):
     """Заявки пользователя: (id, device, model, condition, price, status, created_at)."""
     conn = get_connection()
     cur = conn.cursor()

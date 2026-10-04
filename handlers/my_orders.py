@@ -3,7 +3,7 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery
 
 from keyboards import back_menu
-from database import get_user_orders
+from database import list_user_orders
 from utils import STATUS_RU, fmt_date
 
 router = Router()
@@ -11,7 +11,7 @@ router = Router()
 
 @router.callback_query(F.data == "menu_orders")
 async def cb_menu_orders(call: CallbackQuery):
-    orders = get_user_orders(call.from_user.id)
+    orders = list_user_orders(call.from_user.id)
 
     if not orders:
         await call.message.edit_text(
