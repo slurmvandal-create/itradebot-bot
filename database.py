@@ -227,4 +227,74 @@ def get_published_reviews():
     cur.close()
     conn.close()
     return rows
+def get_all_users():
+    """Все пользователи: (telegram_id, username, full_name, created_at)."""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT telegram_id, username, full_name, created_at FROM users ORDER BY created_at DESC")
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
+
+
+def get_pending_reviews():
+    """Отзывы, ожидающие модерации."""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, user_id, full_name, text, photo_id, rating, created_at
+        FROM reviews WHERE is_published = FALSE
+        ORDER BY created_at DESC
+    """)
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
+
+
+def delete_review(review_id):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM reviews WHERE id = %s", (review_id,))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def delete_order(order_id):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM orders WHERE id = %s", (order_id,))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def get_order_by_id(order_id):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, user_id, username, full_name, device, model, condition, price, contact, status, created_at
+        FROM orders WHERE id = %s
+    """, (order_id,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    return row
+
+
+def get_stats():
+    """Простая статистика: (кол-во юзеров, кол-во заявок, кол-во отзывов)."""
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM users")
+    users_count = cur.fetchone()[0]
+    cur.execute("SELECT COUNT(*) FROM orders")
+    orders_count = cur.fetchone()[0]
+    cur.execute("SELECT COUNT(*) FROM reviews")
+    reviews_count = cur.fetchone()[0]
+    cur.close()
+    conn.close()
+    return users_count, orders_count, reviews_count
 
