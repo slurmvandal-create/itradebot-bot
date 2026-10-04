@@ -1,7 +1,7 @@
-"""Работа с базой данных PostgreSQL."""
 import os
 import logging
 import psycopg2
+from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -22,7 +22,7 @@ def get_connection():
 def init_db():
     """Создает таблицы, если их нет."""
     if not DATABASE_URL:
-        log.error("❌ DATABASE_URL не найден! Проверьте переменные окружения.")
+        log.error("❌ DATABASE_URL не найден!")
         return
 
     conn = get_connection()
@@ -70,60 +70,67 @@ def init_db():
 
 # ---------- ПОЛЬЗОВАТЕЛИ ----------
 
-def add_user(telegram_id: int, username: str = None, first_name: str = None):
-    """Создаёт или обновляет пользователя."""
+def add_user(telegram_id, username=None, first_name=None, avatar_file_id=None):
+    """Добавляет или обновляет пользователя."""
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
-        INSERT INTO users (telegram_id, username, first_name)
-        VALUES (%s, %s, %s)
+        INSERT INTO users (telegram_id, username, first_name, avatar_file_id)
+        VALUES (%s, %s, %s, %s)
         ON CONFLICT (telegram_id) DO UPDATE
         SET username = EXCLUDED.username,
-            first_name = EXCLUDED.first_name
-    """, (telegram_id, username, first_name))
+            first_name = EXCLUDED.first_name,
+            avatar_file_id = COALESCE(EXCLUDED.avatar_file_id, users.avatar_file_id)
+    """, (telegram_id, username, first_name, avatar_file_id))
     conn.commit()
     cur.close()
     conn.close()
 
 
-def get_user(telegram_id: int):
-    """Возвращает данные пользователя или None."""
+def get_user(telegram_id):
     conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT telegram_id, username, first_name FROM users WHERE telegram_id = %s", (telegram_id,))
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur.execute("SELECT * FROM users WHERE telegram_id = %s", (telegram_id,))
     row = cur.fetchone()
     cur.close()
     conn.close()
     return row
 
 
+def get_all_users():
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT telegram_id FROM users")
+    rows = [r[0] for r in cur.fetchall()]
+    cur.close()
+    conn.close()
+    return rows
+
+
 # ---------- ЗАКАЗЫ ----------
 
-def add_order(user_id: int, category: str, description: str, telegram_file_id: str = None):
-    """Добавляет заказ, возвращает его id."""
+def add_order(user_id, category=None, description=None, telegram_file_id=None):
+    """Создает новый заказ, возвращает его id."""
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
         INSERT INTO orders (user_id, category, description, telegram_file_id)
-        VALUES (%s, %s, %s, %s)
-        RETURNING id
+        VALUES (%s, %s, %s, %s) RETURNING id
     """, (user_id, category, description, telegram_file_id))
     order_id = cur.fetchone()[0]
     conn.commit()
     cur.close()
     conn.close()
-    log.info(f"📦 Добавлен заказ #{order_id} от пользователя {user_id}")
     return order_id
 
 
-def get_user_orders(user_id: int):
+def get_orders(user_id):
     """Возвращает список заказов конкретного пользователя."""
     conn = get_connection()
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
     cur.execute("""
-        SELECT id, category, description, status, created_at
-        FROM orders
-        WHERE user_id = %s
+        SELECT id, category, description, status, telegram_file_id, created_at
+        FROM orders WHERE user_id = %s
         ORDER BY created_at DESC
     """, (user_id,))
     rows = cur.fetchall()
@@ -133,13 +140,13 @@ def get_user_orders(user_id: int):
 
 
 def get_all_orders():
-    """Возвращает все заказы (для админа)."""
     conn = get_connection()
-    cur = conn.cursor()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
     cur.execute("""
-        SELECT id, user_id, category, description, status, created_at
-        FROM orders
-        ORDER BY created_at DESC
+        SELECT o.*, u.username, u.first_name
+        FROM orders o
+        LEFT JOIN users u ON o.user_id = u.telegram_id
+        ORDER BY o.created_at DESC
     """)
     rows = cur.fetchall()
     cur.close()
@@ -147,95 +154,98 @@ def get_all_orders():
     return rows
 
 
-def get_order_by_id(order_id: int):
-    """Возвращает один заказ по id."""
+def get_order_by_id(order_id):
     conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT id, user_id, category, description, telegram_file_id, status, created_at
-        FROM orders
-        WHERE id = %s
-    """, (order_id,))
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur.execute("SELECT * FROM orders WHERE id = %s", (order_id,))
     row = cur.fetchone()
     cur.close()
     conn.close()
     return row
 
 
-def update_order_status(order_id: int, status: str):
-    """Обновляет статус заказа."""
+def update_order_status(order_id, status):
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("UPDATE orders SET status = %s WHERE id = %s", (status, order_id))
     conn.commit()
     cur.close()
     conn.close()
-    log.info(f"🔄 Заказ #{order_id} → статус '{status}'")
+
+
+def delete_order(order_id):
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM orders WHERE id = %s", (order_id,))
+    conn.commit()
+    cur.close()
+    conn.close()
 
 
 # ---------- ОТЗЫВЫ ----------
 
-def add_review(user_id: int, text: str, rating: int, telegram_file_id: str = None):
-    """Добавляет отзыв, возвращает его id."""
+def add_review(user_id, text=None, rating=None, telegram_file_id=None):
+    """Создает новый отзыв, возвращает его id."""
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("""
         INSERT INTO reviews (user_id, text, rating, telegram_file_id)
-        VALUES (%s, %s, %s, %s)
-        RETURNING id
+        VALUES (%s, %s, %s, %s) RETURNING id
     """, (user_id, text, rating, telegram_file_id))
     review_id = cur.fetchone()[0]
     conn.commit()
     cur.close()
     conn.close()
-    log.info(f"⭐ Добавлен отзыв #{review_id} от пользователя {user_id} (оценка {rating})")
     return review_id
 
 
-def get_reviews(published_only: bool = False):
-    """
-    Возвращает отзывы.
-    Если published_only=True — только опубликованные (для сайта).
-    Если False — все (для админ-панели).
-    """
+def get_pending_reviews():
+    """Отзывы, которые ждут модерации."""
     conn = get_connection()
-    cur = conn.cursor()
-    if published_only:
-        cur.execute("""
-            SELECT id, user_id, text, rating, telegram_file_id, created_at
-            FROM reviews
-            WHERE is_published = TRUE
-            ORDER BY created_at DESC
-        """)
-    else:
-        cur.execute("""
-            SELECT id, user_id, text, rating, telegram_file_id, is_published, created_at
-            FROM reviews
-            ORDER BY created_at DESC
-        """)
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur.execute("""
+        SELECT r.*, u.username, u.first_name
+        FROM reviews r
+        LEFT JOIN users u ON r.user_id = u.telegram_id
+        WHERE r.is_published = FALSE
+        ORDER BY r.created_at DESC
+    """)
     rows = cur.fetchall()
     cur.close()
     conn.close()
     return rows
 
 
-def publish_review(review_id: int):
-    """Публикует отзыв (is_published = TRUE)."""
+def get_published_reviews():
+    """Отзывы для сайта (опубликованные)."""
+    conn = get_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur.execute("""
+        SELECT r.*, u.username, u.first_name
+        FROM reviews r
+        LEFT JOIN users u ON r.user_id = u.telegram_id
+        WHERE r.is_published = TRUE
+        ORDER BY r.created_at DESC
+    """)
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return rows
+
+
+def publish_review(review_id):
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("UPDATE reviews SET is_published = TRUE WHERE id = %s", (review_id,))
     conn.commit()
     cur.close()
     conn.close()
-    log.info(f"📢 Отзыв #{review_id} опубликован")
 
 
-def delete_review(review_id: int):
-    """Удаляет отзыв."""
+def delete_review(review_id):
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("DELETE FROM reviews WHERE id = %s", (review_id,))
     conn.commit()
     cur.close()
     conn.close()
-    log.info(f"🗑 Отзыв #{review_id} удалён")
