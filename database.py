@@ -249,3 +249,8 @@ def delete_review(review_id):
     conn.commit()
     cur.close()
     conn.close()
+
+
+def get_user_orders(user_id):
+    """Псевдоним для get_orders — для совместимости с handlers/my_orders.py."""
+    return get_orders(user_id)
